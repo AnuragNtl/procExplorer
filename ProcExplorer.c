@@ -19,15 +19,80 @@ struct ChangeEvents
 {
 	char *name;
 	unsigned short int eventType;
+	struct ChangeEvents *next;
 };
-typedef ChangeEvents ChangeEvents;
+void addChangeEvent(struct ChangeEvents *,char *name,unsigned short int eventType);
+struct ChangeEvents* createChangeEvent(char *name,unsigned short int eventType);
+struct ChangeEvents* createChangeEvent(char *name,unsigned short int eventType)
+{
+	struct ChangeEvents *r=(struct ChangeEvents *)malloc(sizeof(struct ChangeEvents));
+	r->next=NULL;
+	r->name=name;
+	r->eventType=eventType;
+	return r;
+}
+void addChangeEvent(struct ChangeEvents *r,char *name,unsigned short int eventType)
+{
+	if(r==NULL)
+		return;
+while(r->next!=NULL)
+{
+r=r->next;
+}
+r->next=createChangeEvent(name,eventType);
+}
+void emptyChangeEvents(struct ChangeEvents **r1)
+{
+struct ChangeEvents *r=*r1;
+	struct ChangeEvents *t;
+while(r!=NULL)
+{
+t=r;
+r=r->next;
+free(t->name);
+free(t);
+}
+*r1=NULL;
+}
+typedef struct ChangeEvents ChangeEvents;
 struct PrevHooks *prevHooks;
 struct ChangeEvents* watchFileForChange(char *file)
 {
-int fd;
-char rd[4096];
+int fd,wd,l,i=0,changeType;
+char rd[4096]={0},*name;
+struct ChangeEvents *r=NULL;
 fd=inotify_init();
-if(fd)
+if(fd<0)
+{
+	return NULL;
+}
+wd=inotify_add_watch(fd,file,IN_CREATE | IN_MODIFY | IN_DELETE);
+l=read(fd,rd,4096);
+if(l<0)
+return NULL;
+while(i<l)
+{
+	struct inotify_event *e=(struct inotify_event *)&rd[i];
+	if(e->len)
+	{
+		name=(char *)malloc(sizeof(char)*(strlen(e->name)+1));
+		strcpy(name,e->name);
+		if(e->mask & IN_CREATE)
+			changeType=E_CREATE;
+		else if(e->mask & IN_DELETE)
+			changeType=E_DELETE;
+		else
+			changeType=E_MODIFY;
+		if(r==NULL)
+			r=createChangeEvent(name,changeType);
+		else
+			addChangeEvent(r,e->name,changeType);
+	}
+		i+=sizeof(struct inotify_event)+e->len;
+}
+inotify_rm_watch(fd,wd);
+close(fd);
+return r;
 }
 void addHook(char *hk)
 {
@@ -74,6 +139,21 @@ char* getPIDAt(int);
 void showFDInfo(char *pid);
 int main()
 {
+/*/////////////////////////
+struct ChangeEvents *e=NULL;
+while(1)
+{
+e=watchFileForChange("./t1");
+while(e!=NULL)
+{
+	printf("%s %i\n",e->name,e->eventType);
+	e=e->next;
+}
+emptyChangeEvents(&e);
+printf("Emptied Change Events\n");
+}
+return 0;
+////////////////////////*/
 	char *pid;
 	char ch,buf1[1024];
 	int k=0;
@@ -83,11 +163,12 @@ int main()
 do
 {
 ch=getchar();
+printf("Input:\n");
 switch(ch)
 {
 	case '/':system("clear");
 	scanf("%s",buf1);
-	showProcList(buf1);
+	showProcList((strcmp(buf1,"/")==0?NULL:buf1));
 	break;
 	default:
 	scanf("%i",&k);
@@ -119,10 +200,13 @@ void showFDInfo(char *pid)
 			ed=malloc(sizeof(char)*(strlen(dirInfo->d_name)+strlen(dir)+2));
 			sprintf(ed,"%s/%s",dir,dirInfo->d_name);
 		ss=readlink(ed,elink,1023);
+		if(access(elink,F_OK)!=-1)
+		{
 		if(ss>0)
 			elink[ss]='\0';
 		printf("%s\n",elink);
-			dirInfo=readdir(p);
+		}
+					dirInfo=readdir(p);
 		free(ed);
 		}
 	}
