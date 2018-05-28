@@ -14,7 +14,7 @@ struct PrevHooks
 char *prevHooks;
 struct PrevHooks *next;
 };
-const E_CREATE=0,E_DELETE=1,E_MODIFY=2;
+const int  E_CREATE=0,E_DELETE=1,E_MODIFY=2;
 struct ChangeEvents
 {
 	char *name;
