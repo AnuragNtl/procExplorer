@@ -9,6 +9,25 @@
 #include<unistd.h>
 #include<termios.h>
 #include<sys/inotify.h>
+struct GList
+{
+void *val;
+struct GList *next;
+struct GList *head;
+struct GList *tail;
+};
+struct GList* gListCreate()
+{
+	struct GList *list=malloc(sizeof(struct GList));
+	list->val=NULL;
+	list->next=NULL;
+	return list;
+}
+void insertIntoGList()
+{
+
+}
+
 struct PrevHooks
 {
 char *prevHooks;
@@ -196,6 +215,7 @@ void showFDInfo(char *pid)
 			p=opendir(dir);
 	dirInfo=readdir(p);
 		printf("\tFD Info:\n");
+
 		while(dirInfo!=NULL)
 		{
 			ed=malloc(sizeof(char)*(strlen(dirInfo->d_name)+strlen(dir)+2));
