@@ -9,12 +9,20 @@
 #include<unistd.h>
 #include<termios.h>
 #include<sys/inotify.h>
+#include<pthread.h>
+void runWatcher(void *details);
+struct GList;
+struct WatcherDetails
+{
+char *file;
+struct GList *node;
+volatile unsigned short int terminate;
+};
+
 struct GList
 {
 void *val;
 struct GList *next;
-struct GList *head;
-struct GList *tail;
 };
 struct GList* gListCreate()
 {
@@ -23,9 +31,35 @@ struct GList* gListCreate()
 	list->next=NULL;
 	return list;
 }
-void insertIntoGList()
+void insertIntoGList(struct GList **list,void *val)
 {
-
+struct GList *head=*list,*t;
+if(head==NULL)
+{
+t=gListCreate();
+t->val=val;
+*list=t;
+}
+else
+{
+	t=gListCreate();
+	t->val=val;
+	t->next=head;
+	*list=t;
+}
+}
+void clearGList(struct GList **list)
+{
+	struct GList *t,*node;
+if(*list==NULL)
+	return;
+for(node=*list;node!=NULL;node=t)
+{
+	t=node->next;
+	free(node->val);
+	free(node);
+}
+*list=NULL;
 }
 
 struct PrevHooks
@@ -203,7 +237,7 @@ return 0;
 }
 void showFDInfo(char *pid)
 {
-	int ss;
+	int ss,i=0,choice=0;
 	char *dir,*ed;
 	char elink[1024];
 	struct dirent *dirInfo;
@@ -215,7 +249,7 @@ void showFDInfo(char *pid)
 			p=opendir(dir);
 	dirInfo=readdir(p);
 		printf("\tFD Info:\n");
-
+		struct GList *fileList=NULL;
 		while(dirInfo!=NULL)
 		{
 			ed=malloc(sizeof(char)*(strlen(dirInfo->d_name)+strlen(dir)+2));
@@ -225,8 +259,18 @@ void showFDInfo(char *pid)
 		{
 		if(ss>0)
 			elink[ss]='\0';
-		printf("%s\n",elink);
+		insertIntoGList(&fileList,elink);
+		printf("%d. %s\n",i++,elink);
 		}
+		if(i==0)
+			return;
+		printf("Enter your choice(s) %d to quit:\n",i);
+		choice=0;
+		while(choice!=i)
+		{
+		scanf("%d",&choice);
+		}
+
 					dirInfo=readdir(p);
 		free(ed);
 		}
@@ -326,4 +370,16 @@ if(stat(file,&s)==0)
 return s.st_size;
 else
 return -1;
+}
+void runWatcher(void *d1)
+{
+struct WatcherDetails *details=(struct WatcherDetails *)d1;
+struct ChangeEvents *changeEvents;
+struct GList *changeEventList;
+char *file=details->file;
+while(!details->terminate)
+{
+changeEvents=watchFileForChange(file);
+insertIntoGList(&changeEventList,changeEvents);
+}
 }
