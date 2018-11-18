@@ -10,6 +10,7 @@
 #include<termios.h>
 #include<sys/inotify.h>
 #include<pthread.h>
+pthread_mutex_t watcherDetailsListMutex=PTHREAD_MUTEX_INITIALIZER;
 void runWatcher(void *details);
 struct GList;
 struct WatcherDetails
@@ -131,17 +132,23 @@ while(i<l)
 	{
 		name=(char *)malloc(sizeof(char)*(strlen(e->name)+1));
 		strcpy(name,e->name);
+	}
+	else
+	{
+		name=(char *)malloc(sizeof(char)*(strlen(file)+1));
+		strcpy(name,file);
+	}	
 		if(e->mask & IN_CREATE)
 			changeType=E_CREATE;
 		else if(e->mask & IN_DELETE)
 			changeType=E_DELETE;
 		else
 			changeType=E_MODIFY;
+		
 		if(r==NULL)
 			r=createChangeEvent(name,changeType);
 		else
 			addChangeEvent(r,e->name,changeType);
-	}
 		i+=sizeof(struct inotify_event)+e->len;
 }
 inotify_rm_watch(fd,wd);
@@ -191,88 +198,129 @@ int getContents(char *file,char *,int);
 int getSize(char *);
 char* getPIDAt(int);
 void showFDInfo(char *pid);
-int main()
+void showMenu();
+struct GList *watcherDetailsList;
+void* startWatcherThread(void *file);
+void showWatchers();
+void showWatcherDetails(struct WatcherDetails * details);
+
+int main(int argc,char *argv[])
 {
-/*/////////////////////////
-struct ChangeEvents *e=NULL;
-while(1)
-{
-e=watchFileForChange("./t1");
-while(e!=NULL)
-{
-	printf("%s %i\n",e->name,e->eventType);
-	e=e->next;
-}
-emptyChangeEvents(&e);
-printf("Emptied Change Events\n");
-}
-return 0;
-////////////////////////*/
 	char *pid;
-	char ch,buf1[1024];
-	int k=0;
+	char buf1[1024];
+	int k,ch;
 	prevHooks=NULL;
 	showProcList(NULL);
-	ch='q';
+	ch=4;
+	watcherDetailsList=NULL;
 do
 {
-ch=getchar();
-printf("Input:\n");
+printf("Input:\n1 :Find Process\n 2:Show files used by a process\n3.Show Files being watched\n4.Quit\n");
+scanf("%i",&ch);
 switch(ch)
 {
-	case '/':system("clear");
+	case 1:system("clear");
 	scanf("%s",buf1);
 	showProcList((strcmp(buf1,"/")==0?NULL:buf1));
 	break;
-	default:
+	case 2:
+	printf("Enter Process Number\n");
 	scanf("%i",&k);
 	pid=getPIDAt(k);
-	if(pid)
-		showFDInfo(pid);
+	printf("%s\n",pid);
+	showFDInfo(pid);
+	break;
+	case 3:
+	showWatchers();
+	break;
+	default:
+	return 0;
+	break;
 }
 }
-while(ch!='q');
+while(ch!=4);
 
 return 0;
 }
+void showWatchers()
+{
+	int i,chs,k;
+	struct GList *t;
+	for(i=0,t=watcherDetailsList;t!=NULL;t=t->next,i++)
+	{
+		printf("%i %s\n",i,((struct WatcherDetails *)t->val)->file);
+	}
+	printf("%d to quit\n",i);
+	scanf("%d",&chs);
+	if(chs<i)
+		{
+		for(k=0,t=watcherDetailsList;k<chs;k++,t=t->next);
+			printf("%s\n",((struct WatcherDetails *)t->val)->file);
+		showWatcherDetails((struct WatcherDetails *)t->val);
+		}
+		struct WatcherDetails *wDetails=(struct WatcherDetails *)t->val;
+		printf("1.Remove watchers\n2.Continue\n");
+		scanf("%i",&chs);
+		switch(chs)
+		{
+			case 1:wDetails->terminate=1;
+			break;
+		}
+}
 void showFDInfo(char *pid)
 {
-	int ss,i=0,choice=0;
-	char *dir,*ed;
-	char elink[1024];
+	int ss,i=0,choice=0,k;
+		struct GList *fileList=NULL,*temp=NULL;
+	char *dir,*ed,*file;
+	char elink[1024],*elink1;
+	pthread_t thrd;
 	struct dirent *dirInfo;
 	DIR *p;
 	dir=malloc(sizeof(char)*(strlen(pid)+10));
 	sprintf(dir,"/proc/%s/fd",pid);
+	printf("Files available to be watched\n");
 	if(access(dir,F_OK)!=-1)
 	{
 			p=opendir(dir);
 	dirInfo=readdir(p);
 		printf("\tFD Info:\n");
-		struct GList *fileList=NULL;
 		while(dirInfo!=NULL)
 		{
 			ed=malloc(sizeof(char)*(strlen(dirInfo->d_name)+strlen(dir)+2));
 			sprintf(ed,"%s/%s",dir,dirInfo->d_name);
+			//printf("%s\n",dirInfo->d_name);
 		ss=readlink(ed,elink,1023);
-		if(access(elink,F_OK)!=-1)
-		{
 		if(ss>0)
 			elink[ss]='\0';
-		insertIntoGList(&fileList,elink);
-		printf("%d. %s\n",i++,elink);
-		}
-		if(i==0)
-			return;
-		printf("Enter your choice(s) %d to quit:\n",i);
-		choice=0;
-		while(choice!=i)
+		else
 		{
-		scanf("%d",&choice);
+			elink[0]='\0';
+		}
+		elink1=(char *)malloc(strlen(elink)*sizeof(char));
+		strcpy(elink1,elink);
+		if(ss>0 && access(elink,F_OK)!=-1)
+		{
+		insertIntoGList(&fileList,elink1);
+		printf("%d. %s\n",i++,elink1);
 		}
 
 					dirInfo=readdir(p);
 		free(ed);
+		}
+		if(i==0)
+			return;
+		choice=0;
+		while(choice!=i)
+		{
+		printf("Enter your choice(s) \n%d to quit:\n",i);
+		scanf("%d",&choice);
+		if(choice!=i)
+			{
+				for(k=i-1,temp=fileList;k>choice;k--,temp=temp->next);
+					file=(char *)temp->val;
+					pthread_create(&thrd,NULL,startWatcherThread,(void *)file);
+
+			}
 		}
 	}
 }
@@ -371,15 +419,43 @@ return s.st_size;
 else
 return -1;
 }
+
 void runWatcher(void *d1)
 {
 struct WatcherDetails *details=(struct WatcherDetails *)d1;
-struct ChangeEvents *changeEvents;
-struct GList *changeEventList;
+struct ChangeEvents *changeEvents=NULL;
 char *file=details->file;
+details->node=NULL;
 while(!details->terminate)
 {
 changeEvents=watchFileForChange(file);
-insertIntoGList(&changeEventList,changeEvents);
+if(changeEvents==NULL)
+continue;
+insertIntoGList(&(details->node),changeEvents);
+}
+}
+
+/*void showMenu()
+{
+printf("procExplorer: Explore the /proc fs\nUsage: procExplorer\t[Options]\n-f FILE : watch FILE for changes\n-n PROCESS_NAME: search PROCESS_NAME to show details\n-p PID: show details of process with pid PID\n-w PID: watch process with pid PID for changes in the files\n\n");
+}*/
+void* startWatcherThread(void *f)
+{
+	char *file=(char *)f;
+	struct WatcherDetails *details=malloc(sizeof(struct WatcherDetails));			details->terminate=0;
+details->file=file;
+printf("File %s \n",file);
+pthread_mutex_lock(&watcherDetailsListMutex);
+insertIntoGList(&watcherDetailsList,details);
+pthread_mutex_unlock(&watcherDetailsListMutex);
+		runWatcher(details);
+}
+void showWatcherDetails(struct WatcherDetails *details)
+{
+struct GList *list=details->node;
+for(list=list;list!=NULL;list=list->next)
+{
+	struct ChangeEvents *changeEvents=(struct ChangeEvents *)list->val;
+	printf("%s -------> %s\n",(changeEvents->eventType==E_CREATE?"File Created":changeEvents->eventType==E_MODIFY?"File Modified":"File Deleted"),changeEvents->name);
 }
 }
